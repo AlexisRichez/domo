@@ -1,5 +1,5 @@
 FROM prom/prometheus:v2.30.3
 
-COPY ./docker/prometheus/prometheus.yml /etc/prometheus/
+COPY prometheus.yml /etc/prometheus/
 
 EXPOSE 9090
