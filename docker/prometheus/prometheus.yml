@@ -1,8 +1,11 @@
 global:
-  scrape_interval: 15s
+  scrape_interval: 30s
 
 scrape_configs:
-  - job_name: 'nodered-server-metrics'
+  - job_name: 'domo-metrics'
     metrics_path: /metrics
     static_configs:
-      - targets: ['192.168.1.28:9150']
+      - targets:
+          - '192.168.1.27:9150'
+          - '192.168.1.28:9150'
+          - '192.168.1.29:9150'
