@@ -1,0 +1,179 @@
+esphome:
+  name: epaper-screen
+  friendly_name: epaper-screen
+
+esp32:
+  board: esp32-c3-devkitm-1
+  framework:
+    type: esp-idf
+
+deep_sleep:
+  run_duration: 90s       # give ESP32 1.5 minutes to connect and get HA data
+  sleep_duration: 1800s   # sleep 30 minutes
+
+logger:
+
+api:
+  encryption:
+    key: "Go4Mq1DC03RjCQF7CyqrwCrzs9DK1Uk7YFbze38BgBo="
+
+ota:
+  - platform: esphome
+    password: "8b3ba1d9e6b21167cef3e3978ce18c82"
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+  ap:
+    ssid: "Epaper-Screen Fallback Hotspot"
+    password: "6iW34ZPxFYwe"
+
+captive_portal:
+
+# =========================
+# Fonts (default only)
+# =========================
+font:
+  - file: "gfonts://Inter@700"
+    id: my_default_font
+    size: 26
+  - file: "gfonts://Inter@700"
+    id: my_default_font_big
+    size: 104
+
+# =========================
+# Globals to store last known values
+# =========================
+globals:
+  - id: last_outside_temp
+    type: float
+    initial_value: '0.0'
+  - id: last_outside_humidity
+    type: float
+    initial_value: '0.0'
+  - id: last_living_temp
+    type: float
+    initial_value: '0.0'
+  - id: last_living_humidity
+    type: float
+    initial_value: '0.0'
+
+# =========================
+# Text sensors (HA)
+# =========================
+text_sensor:
+  - platform: homeassistant
+    entity_id: sensor.outside_details
+    id: outside_details
+    internal: true
+
+# =========================
+# Numeric sensors (HA)
+# =========================
+sensor:
+  - platform: homeassistant
+    entity_id: sensor.living_room_temperature
+    id: living_temp
+    internal: true
+
+  - platform: homeassistant
+    entity_id: sensor.living_room_humidity
+    id: living_humidity
+    internal: true
+
+  - platform: homeassistant
+    entity_id: sensor.outside_temperature
+    id: outside_temp
+    internal: true
+
+  - platform: homeassistant
+    entity_id: sensor.outside_humidity
+    id: outside_humidity
+    internal: true
+
+# =========================
+# Time for French date
+# =========================
+time:
+  - platform: homeassistant
+    id: esptime
+
+# =========================
+# Display SPI
+# =========================
+spi:
+  clk_pin: GPIO8
+  mosi_pin: GPIO10
+
+display:
+  - platform: waveshare_epaper
+    cs_pin: GPIO3
+    dc_pin: GPIO5
+    busy_pin:
+      number: GPIO4
+      inverted: true
+    reset_pin: GPIO2
+    model: 7.50inv2
+    update_interval: 60s
+    lambda: |-
+      // ======================
+      // DATE (FRENCH)
+      // ======================
+      auto t = id(esptime).now();
+      if (t.year >= 2025) {
+        const char* mois[12] = {"JANVIER","FEVRIER","MARS","AVRIL","MAI","JUIN","JUILLET","AOUT","SEPTEMBRE","OCTOBRE","NOVEMBRE","DECEMBRE"};
+        char date_buffer[64];
+        snprintf(date_buffer, sizeof(date_buffer), "%02d %s %04d",
+                t.day_of_month,
+                mois[t.month - 1],
+                t.year);
+        it.printf(40, 20, id(my_default_font), "%s", date_buffer);
+      } else {
+        it.printf(40, 20, id(my_default_font), "Connexion HA...");
+      }
+
+      // x = coordonnée horizontale de la ligne
+      int x_line = 400;
+      int y_start = 60;
+      int y_end = 420;
+      it.line(x_line, y_start, x_line, y_end);
+
+      // ======================
+      // OUTSIDE TEMP (LEFT, BIG)
+      // ======================
+      if (!isnan(id(outside_temp).state))
+        id(last_outside_temp) = id(outside_temp).state;  // update last value
+      it.printf(40, 60, id(my_default_font_big), "%.1f°c", id(last_outside_temp));
+
+      // Outside humidity
+      if (!isnan(id(outside_humidity).state))
+        id(last_outside_humidity) = id(outside_humidity).state;
+      it.printf(40, 170, id(my_default_font), "%.1f%%", id(last_outside_humidity));
+
+      if (id(outside_details).has_state())
+        it.printf(40, 200, id(my_default_font), "%s", id(outside_details).state.c_str());
+      else
+        it.printf(40, 200, id(my_default_font), "No data");
+
+      // ======================
+      // RIGHT COLUMN: LIVING ROOM
+      // ======================
+      int x = 430;
+      int y = 60;
+      int line = 40;
+
+      it.printf(x, y, id(my_default_font), "Salon");
+      y += line;
+
+      // Living room temperature
+      if (!isnan(id(living_temp).state))
+        id(last_living_temp) = id(living_temp).state;
+      it.printf(x, y, id(my_default_font), "%.1f°c", id(last_living_temp));
+      y += line;
+
+      // Living room humidity
+      if (!isnan(id(living_humidity).state))
+        id(last_living_humidity) = id(living_humidity).state;
+      it.printf(x, y, id(my_default_font), "%.1f%%", id(last_living_humidity));
+      y += line;
