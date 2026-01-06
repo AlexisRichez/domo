@@ -15,7 +15,7 @@ logger:
 
 api:
   encryption:
-    key: ""
+    key: "="
 
 ota:
   - platform: esphome
@@ -30,6 +30,98 @@ wifi:
     password: ""
 
 captive_portal:
+
+image:
+  - file: /config/esphome/images/01d.png
+    id: w01d
+    type: BINARY
+    resize: 400x400
+    invert_alpha: true
+  - file: /config/esphome/images/01n.png
+    id: w01n
+    type: BINARY
+    resize: 400x400
+    invert_alpha: true
+  - file: /config/esphome/images/02d.png
+    id: w02d
+    type: BINARY
+    resize: 400x400
+    invert_alpha: true
+  - file: /config/esphome/images/02n.png
+    id: w02n
+    type: BINARY
+    resize: 400x400
+    invert_alpha: true
+  - file: /config/esphome/images/03d.png
+    id: w03d
+    type: BINARY
+    resize: 400x400
+    invert_alpha: true
+  - file: /config/esphome/images/03n.png
+    id: w03n
+    type: BINARY
+    resize: 400x400
+    invert_alpha: true
+  - file: /config/esphome/images/04d.png
+    id: w04d
+    type: BINARY
+    resize: 400x400
+    invert_alpha: true
+  - file: /config/esphome/images/04n.png
+    id: w04n
+    type: BINARY
+    resize: 400x400
+    invert_alpha: true
+  - file: /config/esphome/images/09d.png
+    id: w09d
+    type: BINARY
+    resize: 400x400
+    invert_alpha: true
+  - file: /config/esphome/images/09n.png
+    id: w09n
+    type: BINARY
+    resize: 400x400
+    invert_alpha: true
+  - file: /config/esphome/images/10d.png
+    id: w10d
+    type: BINARY
+    resize: 400x400
+    invert_alpha: true
+  - file: /config/esphome/images/10n.png
+    id: w10n
+    type: BINARY
+    resize: 400x400
+    invert_alpha: true
+  - file: /config/esphome/images/11d.png
+    id: w11d
+    type: BINARY
+    resize: 400x400
+    invert_alpha: true
+  - file: /config/esphome/images/11n.png
+    id: w11n
+    type: BINARY
+    resize: 400x400
+    invert_alpha: true
+  - file: /config/esphome/images/13d.png
+    id: w13d
+    type: BINARY
+    resize: 400x400
+    invert_alpha: true
+  - file: /config/esphome/images/13n.png
+    id: w13n
+    type: BINARY
+    resize: 400x400
+    invert_alpha: true
+  - file: /config/esphome/images/50d.png
+    id: w50d
+    type: BINARY
+    resize: 400x400
+    invert_alpha: true
+  - file: /config/esphome/images/50n.png
+    id: w50n
+    type: BINARY
+    resize: 400x400
+    invert_alpha: true
 
 # =========================
 # Fonts (default only)
@@ -66,6 +158,11 @@ text_sensor:
   - platform: homeassistant
     entity_id: sensor.outside_details
     id: outside_details
+    internal: true
+
+  - platform: homeassistant
+    entity_id: sensor.outside_icon
+    id: outside_icon
     internal: true
 
 # =========================
@@ -155,6 +252,35 @@ display:
         it.printf(40, 200, id(my_default_font), "%s", id(outside_details).state.c_str());
       else
         it.printf(40, 200, id(my_default_font), "No data");
+
+
+      if (id(outside_icon).has_state()) {
+        // prepend "w" to the MQTT value
+        std::string key = "w" + std::string(id(outside_icon).state.c_str());
+
+        // now check which image matches dynamically
+        if (key == "w01d") it.image(40, 250, id(w01d));
+        else if (key == "w01n") it.image(40, 250, id(w01n));
+        else if (key == "w02d") it.image(40, 250, id(w02d));
+        else if (key == "w02n") it.image(40, 250, id(w02n));
+        else if (key == "w03d") it.image(40, 250, id(w03d));
+        else if (key == "w03n") it.image(40, 250, id(w03n));
+        else if (key == "w04d") it.image(40, 250, id(w04d));
+        else if (key == "w04n") it.image(40, 250, id(w04n));
+        else if (key == "w09d") it.image(40, 250, id(w09d));
+        else if (key == "w09n") it.image(40, 250, id(w09n));
+        else if (key == "w10d") it.image(40, 250, id(w10d));
+        else if (key == "w10n") it.image(40, 250, id(w10n));
+        else if (key == "w11d") it.image(40, 250, id(w11d));
+        else if (key == "w11n") it.image(40, 250, id(w11n));
+        else if (key == "w13d") it.image(40, 250, id(w13d));
+        else if (key == "w13n") it.image(40, 250, id(w13n));
+        else if (key == "w50d") it.image(40, 250, id(w50d));
+        else if (key == "w50n") it.image(40, 250, id(w50n));
+        else it.printf(40, 250, id(my_default_font), "No icon");
+      } else {
+        it.printf(40, 250, id(my_default_font), "No icon");
+      }
 
       // ======================
       // RIGHT COLUMN: LIVING ROOM
