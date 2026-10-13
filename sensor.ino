@@ -34,6 +34,17 @@ const unsigned long interval = 60000; // 60 seconds
 
 bool lastButtonState = HIGH;
 
+// IAQ: auto-calibrated baseline
+float gasBaseline = 0;                                  // "clean air" reference resistance
+const unsigned long BURN_IN_MS = 30UL * 60UL * 1000UL;  // 30 min heater warm-up after boot
+const float BASELINE_DECAY = 1.0 / 1440.0;              // ~1 day memory (1 reading/min)
+
+// BME680 self-heating compensation (ESP + gas heater inside the PLA case)
+const float BME680_TEMP_OFFSET = 2.5;  // °C to subtract; tune against a reference thermometer
+const float BMP180_TEMP_OFFSET = 2.5;  // same for the BMP180 (position in the case may differ)
+
+void mqtt_callback(char *topic, byte *payload, unsigned int length);
+
 void blinkLED(int times = 1, int duration = 200) {
   for (int i = 0; i < times; i++) {
     digitalWrite(LED_PIN, HIGH);
@@ -82,24 +93,47 @@ bool publishSensorData(const char *topic, StaticJsonDocument<200> &doc) {
   return false;
 }
 
-// --- Calculate simplified IAQ ---
-float calculateIAQ(float gas_resistance, float humidity) {
-  float gas_score = (log(gas_resistance) - log(1000)) / (log(1000000) - log(1000));
-  gas_score = constrain(gas_score, 0.0, 1.0);
+// --- Rescale relative humidity from the (warmer) sensor temperature to the real room temperature ---
+// Absolute water content is the same, only the saturation pressure changes (Magnus formula)
+float correctHumidity(float hum, float t_sensor, float t_real) {
+  float es_sensor = 6.112 * exp(17.62 * t_sensor / (243.12 + t_sensor));
+  float es_real = 6.112 * exp(17.62 * t_real / (243.12 + t_real));
+  return constrain(hum * es_sensor / es_real, 0.0, 100.0);
+}
 
+// --- Calculate simplified IAQ ---
+// Returns IAQ 0 (excellent) .. 500 (severe), or -1 during burn-in
+float calculateIAQ(float gas_resistance, float humidity) {
+  // Baseline tracks the max observed resistance, slowly decaying to follow sensor drift
+  if (gas_resistance > gasBaseline) gasBaseline = gas_resistance;
+  else gasBaseline += (gas_resistance - gasBaseline) * BASELINE_DECAY;
+
+  // Latched flag so the millis() rollover (~49 days) doesn't restart the burn-in
+  static bool burnInDone = false;
+  if (!burnInDone) {
+    if (millis() < BURN_IN_MS) return -1;
+    burnInDone = true;
+  }
+
+  // Gas score: 1.0 = as clean as the baseline
+  float gas_score = constrain(gas_resistance / gasBaseline, 0.0, 1.0);
+
+  // Humidity score: 1.0 between 40 and 60 %
   float hum_score;
   if (humidity >= 40 && humidity <= 60) hum_score = 1.0;
   else if (humidity < 40) hum_score = humidity / 40.0;
   else hum_score = (100 - humidity) / 40.0;
   hum_score = constrain(hum_score, 0.0, 1.0);
 
-  float iaq_score = (gas_score * 0.75 + hum_score * 0.25) * 500.0;
-  return iaq_score;
+  // Quality 0..1 (1 = perfect), inverted to the IAQ scale (0 = best)
+  float quality = gas_score * 0.75 + hum_score * 0.25;
+  return (1.0 - quality) * 500.0;
 }
 
 // --- Interpret IAQ in English ---
 const char* interpretIAQ(float iaq) {
-  if (iaq <= 50) return "Excellent";
+  if (iaq < 0) return "Calibrating";
+  else if (iaq <= 50) return "Excellent";
   else if (iaq <= 100) return "Good";
   else if (iaq <= 150) return "Moderate";
   else if (iaq <= 200) return "Poor";
@@ -123,6 +157,7 @@ void readAndSendSensors() {
   if (event.pressure) {
     float temperature, pressure;
     bmp.getTemperature(&temperature);
+    temperature -= BMP180_TEMP_OFFSET;
     pressure = event.pressure;
     Serial.printf("[SENSOR] BMP180 Temp: %.2f °C | Pressure: %.2f hPa\n", temperature, pressure);
 
@@ -141,15 +176,15 @@ void readAndSendSensors() {
 
   // --- BME680 ---
   if (bme680.performReading()) {
-    float temp = bme680.temperature;
-    float hum = bme680.humidity;
+    float temp = bme680.temperature - BME680_TEMP_OFFSET;
+    float hum = correctHumidity(bme680.humidity, bme680.temperature, temp);
     float press = bme680.pressure / 100.0;
     float gas = bme680.gas_resistance;
     float iaq = calculateIAQ(gas, hum);
     const char *iaq_text = interpretIAQ(iaq);
 
-    Serial.printf("[SENSOR] BME680 Temp: %.2f °C | Hum: %.2f %% | Press: %.2f hPa | Gas: %.0f Ω | IAQ: %.1f (%s)\n",
-                  temp, hum, press, gas, iaq, iaq_text);
+    Serial.printf("[SENSOR] BME680 Temp: %.2f °C | Hum: %.2f %% | Press: %.2f hPa | Gas: %.0f Ω | Baseline: %.0f Ω | IAQ: %.1f (%s)\n",
+                  temp, hum, press, gas, gasBaseline, iaq, iaq_text);
 
     StaticJsonDocument<200> msgT;
     msgT["sensor_id"] = mqtt_client_id;
@@ -175,17 +210,20 @@ void readAndSendSensors() {
     msgG["value"] = gas;
     publishSensorData("appartment/livingroom/gas", msgG);
 
-    StaticJsonDocument<200> msgIAQ;
-    msgIAQ["sensor_id"] = mqtt_client_id;
-    msgIAQ["ip_address"] = WiFi.localIP().toString();
-    msgIAQ["value"] = iaq;
-    publishSensorData("appartment/livingroom/iaq", msgIAQ);
+    // Skip IAQ while the sensor is still warming up
+    if (iaq >= 0) {
+      StaticJsonDocument<200> msgIAQ;
+      msgIAQ["sensor_id"] = mqtt_client_id;
+      msgIAQ["ip_address"] = WiFi.localIP().toString();
+      msgIAQ["value"] = iaq;
+      publishSensorData("appartment/livingroom/iaq", msgIAQ);
 
-    StaticJsonDocument<200> msgIAQQuality;
-    msgIAQ["sensor_id"] = mqtt_client_id;
-    msgIAQ["ip_address"] = WiFi.localIP().toString();
-    msgIAQ["value"] = iaq_text;
-    publishSensorData("appartment/livingroom/iaq/quality", msgIAQ);
+      StaticJsonDocument<200> msgIAQQuality;
+      msgIAQQuality["sensor_id"] = mqtt_client_id;
+      msgIAQQuality["ip_address"] = WiFi.localIP().toString();
+      msgIAQQuality["value"] = iaq_text;
+      publishSensorData("appartment/livingroom/iaq/quality", msgIAQQuality);
+    }
 
   } else {
     Serial.println("[ERROR] Failed to perform BME680 reading.");
