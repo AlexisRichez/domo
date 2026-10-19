@@ -1,3 +1,4 @@
+
 esphome:
   name: epaper-screen
   friendly_name: epaper-screen
@@ -8,14 +9,14 @@ esp32:
     type: esp-idf
 
 deep_sleep:
-  run_duration: 90s       # give ESP32 1.5 minutes to connect and get HA data
-  sleep_duration: 1800s   # sleep 30 minutes
+  run_duration: 60s
+  sleep_duration: 1800s
 
 logger:
 
 api:
   encryption:
-    key: "="
+    key: ""
 
 ota:
   - platform: esphome
@@ -24,13 +25,15 @@ ota:
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
-
   ap:
     ssid: "Epaper-Screen Fallback Hotspot"
-    password: ""
+    password: "6iW34ZPxFYwe"
 
 captive_portal:
 
+# =========================
+# Images météo
+# =========================
 image:
   - file: /config/esphome/images/01d.png
     id: w01d
@@ -124,35 +127,58 @@ image:
     invert_alpha: true
 
 # =========================
-# Fonts (default only)
+# Polices
 # =========================
 font:
   - file: "gfonts://Inter@700"
     id: my_default_font
-    size: 26
+    size: 30
   - file: "gfonts://Inter@700"
     id: my_default_font_big
     size: 104
 
 # =========================
-# Globals to store last known values
+# Variables globales
 # =========================
 globals:
   - id: last_outside_temp
     type: float
     initial_value: '0.0'
+
   - id: last_outside_humidity
     type: float
     initial_value: '0.0'
+
   - id: last_living_temp
     type: float
     initial_value: '0.0'
+
   - id: last_living_humidity
     type: float
     initial_value: '0.0'
 
+  - id: last_chamber_temp
+    type: float
+    initial_value: '0.0'
+
+  - id: last_chamber_humidity
+    type: float
+    initial_value: '0.0'
+
+  - id: last_bathroom_temp
+    type: float
+    initial_value: '0.0'
+
+  - id: last_bathroom_humidity
+    type: float
+    initial_value: '0.0'
+
+  - id: screen_updated
+    type: bool
+    initial_value: 'false'
+
 # =========================
-# Text sensors (HA)
+# Capteurs texte Home Assistant
 # =========================
 text_sensor:
   - platform: homeassistant
@@ -166,7 +192,7 @@ text_sensor:
     internal: true
 
 # =========================
-# Numeric sensors (HA)
+# Capteurs numériques Home Assistant
 # =========================
 sensor:
   - platform: homeassistant
@@ -183,28 +209,55 @@ sensor:
     entity_id: sensor.outside_temperature
     id: outside_temp
     internal: true
+    on_value:
+      then:
+        - script.execute: refresh_screen
 
   - platform: homeassistant
     entity_id: sensor.outside_humidity
     id: outside_humidity
     internal: true
 
+  - platform: homeassistant
+    entity_id: sensor.chamber_temperature
+    id: chamber_temp
+    internal: true
+
+  - platform: homeassistant
+    entity_id: sensor.chamber_humidity
+    id: chamber_humidity
+    internal: true
+
+  - platform: homeassistant
+    entity_id: sensor.bathroom_temperature
+    id: bathroom_temp
+    internal: true
+
+  - platform: homeassistant
+    entity_id: sensor.bathroom_humidity
+    id: bathroom_humidity
+    internal: true
+
 # =========================
-# Time for French date
+# Heure Home Assistant
 # =========================
 time:
   - platform: homeassistant
     id: esptime
 
 # =========================
-# Display SPI
+# SPI
 # =========================
 spi:
   clk_pin: GPIO8
   mosi_pin: GPIO10
 
+# =========================
+# Écran ePaper
+# =========================
 display:
   - platform: waveshare_epaper
+    id: epaper
     cs_pin: GPIO3
     dc_pin: GPIO5
     busy_pin:
@@ -212,53 +265,57 @@ display:
       inverted: true
     reset_pin: GPIO2
     model: 7.50inv2
-    update_interval: 60s
+    update_interval: never
+
     lambda: |-
-      // ======================
-      // DATE (FRENCH)
-      // ======================
       auto t = id(esptime).now();
-      if (t.year >= 2025) {
-        const char* mois[12] = {"JANVIER","FEVRIER","MARS","AVRIL","MAI","JUIN","JUILLET","AOUT","SEPTEMBRE","OCTOBRE","NOVEMBRE","DECEMBRE"};
+
+      // =========================
+      // Date
+      // =========================
+      if (t.year >= 2025 && t.month >= 1 && t.month <= 12) {
+        const char* mois[12] = {
+          "JANVIER", "FEVRIER", "MARS", "AVRIL",
+          "MAI", "JUIN", "JUILLET", "AOUT",
+          "SEPTEMBRE", "OCTOBRE", "NOVEMBRE", "DECEMBRE"
+        };
+
         char date_buffer[64];
         snprintf(date_buffer, sizeof(date_buffer), "%02d %s %04d",
-                t.day_of_month,
-                mois[t.month - 1],
-                t.year);
+                 t.day_of_month, mois[t.month - 1], t.year);
+
         it.printf(40, 20, id(my_default_font), "%s", date_buffer);
       } else {
         it.printf(40, 20, id(my_default_font), "Connexion HA...");
       }
 
-      // x = coordonnée horizontale de la ligne
-      int x_line = 400;
-      int y_start = 60;
-      int y_end = 420;
-      it.line(x_line, y_start, x_line, y_end);
+      // Séparation météo / pièces
+      it.line(480, 60, 480, 420);
 
-      // ======================
-      // OUTSIDE TEMP (LEFT, BIG)
-      // ======================
+      // =========================
+      // COLONNE GAUCHE : EXTÉRIEUR
+      // =========================
       if (!isnan(id(outside_temp).state))
-        id(last_outside_temp) = id(outside_temp).state;  // update last value
-      it.printf(40, 60, id(my_default_font_big), "%.1f°c", id(last_outside_temp));
+        id(last_outside_temp) = id(outside_temp).state;
 
-      // Outside humidity
+      it.printf(40, 60, id(my_default_font_big),
+                "%.1f°c", id(last_outside_temp));
+
       if (!isnan(id(outside_humidity).state))
         id(last_outside_humidity) = id(outside_humidity).state;
-      it.printf(40, 170, id(my_default_font), "%.1f%%", id(last_outside_humidity));
 
-      if (id(outside_details).has_state())
-        it.printf(40, 200, id(my_default_font), "%s", id(outside_details).state.c_str());
-      else
-        it.printf(40, 200, id(my_default_font), "No data");
+      it.printf(40, 170, id(my_default_font),
+                "%.1f%%", id(last_outside_humidity));
 
+      if (id(outside_details).has_state()) {
+        it.printf(40, 200, id(my_default_font),
+                  "%s", id(outside_details).state.c_str());
+      }
 
+      // Icône météo
       if (id(outside_icon).has_state()) {
-        // prepend "w" to the MQTT value
         std::string key = "w" + std::string(id(outside_icon).state.c_str());
 
-        // now check which image matches dynamically
         if (key == "w01d") it.image(40, 250, id(w01d));
         else if (key == "w01n") it.image(40, 250, id(w01n));
         else if (key == "w02d") it.image(40, 250, id(w02d));
@@ -277,29 +334,75 @@ display:
         else if (key == "w13n") it.image(40, 250, id(w13n));
         else if (key == "w50d") it.image(40, 250, id(w50d));
         else if (key == "w50n") it.image(40, 250, id(w50n));
-        else it.printf(40, 250, id(my_default_font), "No icon");
-      } else {
-        it.printf(40, 250, id(my_default_font), "No icon");
       }
 
-      // ======================
-      // RIGHT COLUMN: LIVING ROOM
-      // ======================
-      int x = 430;
+      // =========================
+      // COLONNE DROITE : LES PIÈCES
+      // =========================
+      int x = 500;
       int y = 60;
-      int line = 40;
+      int line = 35;
 
-      it.printf(x, y, id(my_default_font), "Salon");
+      // Salon
+      it.printf(x, y, id(my_default_font), "SALON");
       y += line;
 
-      // Living room temperature
       if (!isnan(id(living_temp).state))
         id(last_living_temp) = id(living_temp).state;
-      it.printf(x, y, id(my_default_font), "%.1f°c", id(last_living_temp));
+
+      it.printf(x, y, id(my_default_font),
+                "%.1f°c", id(last_living_temp));
       y += line;
 
-      // Living room humidity
       if (!isnan(id(living_humidity).state))
         id(last_living_humidity) = id(living_humidity).state;
-      it.printf(x, y, id(my_default_font), "%.1f%%", id(last_living_humidity));
+
+      it.printf(x, y, id(my_default_font),
+                "%.1f%%", id(last_living_humidity));
+
+      // Chambre
+      y += line + 15;
+      it.printf(x, y, id(my_default_font), "CHAMBRE");
       y += line;
+
+      if (!isnan(id(chamber_temp).state))
+        id(last_chamber_temp) = id(chamber_temp).state;
+
+      it.printf(x, y, id(my_default_font),
+                "%.1f°c", id(last_chamber_temp));
+      y += line;
+
+      if (!isnan(id(chamber_humidity).state))
+        id(last_chamber_humidity) = id(chamber_humidity).state;
+
+      it.printf(x, y, id(my_default_font),
+                "%.1f%%", id(last_chamber_humidity));
+
+      // Salle de bain
+      y += line + 15;
+      it.printf(x, y, id(my_default_font), "SALLE DE BAIN");
+      y += line;
+
+      if (!isnan(id(bathroom_temp).state))
+        id(last_bathroom_temp) = id(bathroom_temp).state;
+
+      it.printf(x, y, id(my_default_font),
+                "%.1f°c", id(last_bathroom_temp));
+      y += line;
+
+      if (!isnan(id(bathroom_humidity).state))
+        id(last_bathroom_humidity) = id(bathroom_humidity).state;
+
+      it.printf(x, y, id(my_default_font),
+                "%.1f%%", id(last_bathroom_humidity));
+
+# =========================
+# Actualisation écran
+# =========================
+script:
+  - id: refresh_screen
+    mode: restart
+    then:
+      # Attend que les états des capteurs aient le temps d'arriver
+      - delay: 2s
+      - component.update: epaper
